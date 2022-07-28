@@ -39,24 +39,30 @@ mainLoop:
 
 	mov edi,vQuit
 	call streq
-	jz mainLoop_quit
+	jz quit
+	
+	push mainLoop
 	mov edi,vLook
 	call streq
-	jz mainLoop_look
+	jz look
 	mov edi,vExamine
 	call streq
-	jz mainLoop_examine
+	jz examine
 	mov edi,vGo
 	call streq
-	jz mainLoop_go
+	jz go
 	mov edi,vMove
 	call streq
-	jz mainLoop_go
+	jz go
 	mov edi,vExit
 	call streq
-	jz mainLoop_go
+	jz go
+	add esp,4
 
-	; "You don't know how to [verb]."
+	call dontKnow
+	jmp mainLoop
+
+dontKnow: ; "You don't know how to [verb]."
 	mov esi,dontKnowMsg
 	call printStr
 	mov esi,verb
@@ -66,67 +72,90 @@ mainLoop:
 	mov al,10
 	call printChar
 
-	jmp mainLoop
+	ret
 
-mainLoop_quit:
+quit:
 	mov esi,quitMsg
 	call printStr
 	ret
 
-mainLoop_nothing: ; "You can't [verb] nothing!"
+noNoun: ; "You can't [verb] nothing!"
 	mov esi,nothingMsgP1
 	call printStr
 	mov esi,verb
 	call printStr
+
+	mov al,[noun]
+	or al,al
+	jz noNoun_0
+
+	mov al,' '
+	call printChar
+	mov esi,noun
+	call printStr
+noNoun_0:
 	mov esi,nothingMsgP2
 	call printStr
-	jmp mainLoop
+	ret
 
-mainLoop_noSuchThing: ; "You know of no such thing."
+noSuchThing: ; "You know of no such thing."
 	mov esi,noSuchThingMsg
 	call printStr
-	jmp mainLoop
+	ret
 
-mainLoop_cantSeeThat: ; "You can't see that here."
+cantSeeThat: ; "You can't see that here."
 	mov esi,cantSeeThatMsg
 	call printStr
-	jmp mainLoop
+	ret
 
-mainLoop_dontHaveThat: ; "You don't have that."
+dontHaveThat: ; "You don't have that."
 	mov esi,dontHaveThatMsg
 	call printStr
-	jmp mainLoop
+	ret
 
-mainLoop_examine:
+examine:
 	mov edi,noun
 	call getNext
 	mov al,[noun]
 	or al,al
-	jz mainLoop_nothing
+	jz noNoun
+examine_0:
 
 	mov esi,noun
 	call findItem
 	or eax,eax
-	jz mainLoop_noSuchThing
+	jz noSuchThing
 
 	call itemIsHere
-	jnz mainLoop_cantSeeThat
+	jnz cantSeeThat
 
 	mov edx,eax
 	add edx,9
 	call [edx]
 
-	jmp mainLoop
+	ret
 
-mainLoop_look:
+look:
 	; look at
-	mov edi,noun
+	mov edi,noun2
 	call getNext
-	mov esi,noun
+	mov esi,noun2
 	mov edi,wAt
 	call streq
-	jz mainLoop_examine
+	jnz look_0
 
+	mov edi,noun
+	call getNext
+	mov al,[noun]
+	or al,al
+	jnz examine_0
+
+	mov edi,noun
+	mov esi,noun2
+	call strcpy
+	jmp noNoun
+
+look_0:
 	; print desc
 	mov eax,[currentLocation]
 	mov ebx,eax
@@ -141,16 +170,16 @@ mainLoop_look:
 	mov edx,0
 	mov esi,[currentLocation]
 	add esi,9
-mainLoop_look_l0:
+look_l0:
 	lodsd
 	or eax,eax
-	jz mainLoop_look_l0z
+	jz look_l0z
 	inc edx
-mainLoop_look_l0z:
-	loop mainLoop_look_l0
+look_l0z:
+	loop look_l0
 
 	or dl,dl
-	jz mainLoop_look_noexit
+	jz look_noexit
 
 	; print directions
 
@@ -162,10 +191,10 @@ mainLoop_look_l0z:
 	mov ecx,10
 	mov esi,[currentLocation]
 	add esi,9
-mainLoop_look_l1:
+look_l1:
 	lodsd
 	or eax,eax
-	jz mainLoop_look_l1n
+	jz look_l1n
 
 	pusha
 	mov eax,10
@@ -177,9 +206,9 @@ mainLoop_look_l1:
 	popa
 
 	dec edx
-	jz mainLoop_look_l1n
+	jz look_l1n
 	cmp edx,1
-	jz mainLoop_look_l1and
+	jz look_l1and
 
 	pusha
 	mov al,','
@@ -188,71 +217,82 @@ mainLoop_look_l1:
 	call printChar
 	popa
 
-	jmp mainLoop_look_l1n
+	jmp look_l1n
 
-mainLoop_look_l1and:
+look_l1and:
 	pusha
 	mov esi,orMsg
 	call printStr
 	popa
 
-mainLoop_look_l1n:
-	loop mainLoop_look_l1
+look_l1n:
+	loop look_l1
 
 	mov al,'.'
 	call printChar
 	mov al,10
 	call printChar
 
-mainLoop_look_noexit:
-	jmp mainLoop
+look_noexit:
+	ret
 
-mainLoop_go:
+go:
 	mov edi,noun
 	call getNext
 	mov al,[noun]
 	or al,al
-	jnz mainLoop_go_hasDirection
+	jnz go_hasDirection
 
 	mov esi,noDirectionMsg
 	call printStr
-	jmp mainLoop
+	ret
 
-mainLoop_go_hasDirection:
+go_hasDirection:
 	mov esi,noun
-	call isDirection
-	jnz mainLoop_go_validDirection
+	call findDirection
+	jnz go_validDirection
 
 	mov esi,invalidDirectionMsg
 	call printStr
-	jmp mainLoop
+	ret
 
-mainLoop_go_validDirection:
+go_validDirection:
+	shl eax,2
+	add eax,[currentLocation]
+	add eax,9
+	mov dl,[eax]
+	or dl,dl
+	jnz go_canGo
+
 	mov esi,cantGoThatWayMsg
 	call printStr
-	jmp mainLoop
+	ret
 
-; check if is direction, load direction into eax
-isDirection:
+go_canGo:
+	mov eax,[eax]
+	mov dword [currentLocation],eax
+	call printLocTitle
+	ret
+
+; load direction index into eax
+findDirection:
 	mov edi,esi
-	mov esi,directions
 	mov ecx,10
-isDirection_l0:
-	lodsb
-	push esi
-	push edi
-	mov esi,[eax]
-	call streq
-	pop edi
-	pop esi
-	jz isDirection_e
-	loop isDirection_l0
+	mov esi,directions
 
-isDirection_e:
-	pushf
+findDirection_l0:
+	lodsd
+	pusha
+	mov esi,eax
+	call streq
+	popa
+	jz findDirection_l0e
+	loop findDirection_l0
+
+findDirection_l0e:
 	mov eax,10
 	sub eax,ecx
-	popf
+	cmp eax,10
 	ret
 
 ; check if item at eax is in inventory
@@ -322,7 +362,16 @@ printLocTitle:
 	call printChar
 	ret
 
-; compare esi with edi, set zf
+; copy null-terminated str in esi to edi
+strcpy:
+	movsb
+	mov al,[esi]
+	or al,al
+	jnz strcpy
+	stosb
+	ret
+
+; compare esi with edi
 streq:
 	push esi
 	mov ecx,-1
