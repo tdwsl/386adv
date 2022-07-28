@@ -42,6 +42,7 @@ mainLoop:
 	jz quit
 	
 	push mainLoop
+
 	mov edi,vLook
 	call streq
 	jz look
@@ -57,6 +58,13 @@ mainLoop:
 	mov edi,vExit
 	call streq
 	jz go
+	mov edi,vTake
+	call streq
+	jz take
+	mov edi,vPick
+	call streq
+	jz pick
+
 	add esp,4
 
 	call dontKnow
@@ -165,6 +173,22 @@ look_0:
 	mov al,10
 	call printChar
 
+	; list items
+	mov eax,[currentLocation]
+	add eax,8
+	mov dl,[eax]
+	call countItems
+	or ecx,ecx
+	jz look_noItems
+
+	push dx
+	mov esi,youSeeHereMsg
+	call printStr
+	pop dx
+	call listItems
+
+look_noItems:
+
 	; count directions
 	mov ecx,10
 	mov edx,0
@@ -221,7 +245,7 @@ look_l1:
 
 look_l1and:
 	pusha
-	mov esi,orMsg
+	mov esi,orSep
 	call printStr
 	popa
 
@@ -272,6 +296,50 @@ go_canGo:
 	mov eax,[eax]
 	mov dword [currentLocation],eax
 	call printLocTitle
+	ret
+
+take:
+	mov edi,noun
+	call getNext
+	mov al,[noun]
+	or al,al
+	jz noNoun
+
+take_0:
+	mov esi,noun
+	call findItem
+	or eax,eax
+	jz noSuchThing
+
+	call itemIsHere
+	jnz cantSeeThat
+
+	mov ebx,eax
+	add ebx,13
+	jmp [ebx]
+
+pick:
+	mov edi,noun
+	call getNext
+	mov esi,noun
+	mov edi,dUp
+	call streq
+	jnz pick_notUp
+
+	mov edi,noun2
+	call getNext
+	mov al,[noun2]
+	or al,al
+	jz noNoun
+
+	mov esi,noun2
+	mov edi,noun
+	call strcpy
+	jmp take_0
+
+pick_notUp:
+	mov esi,cantPickMsg
+	call printStr
 	ret
 
 ; load direction index into eax
@@ -344,9 +412,92 @@ defExamine:
 
 ; default take
 defTake:
+	add eax,8
+	cmp byte [eax],1
+	jz defTake_has
+
+	mov byte [eax],1
+	mov esi,takenMsg
+	call printStr
+	ret
+
+defTake_has:
+	mov esi,alreadyHaveMsg
+	call printStr
 	ret
 
 defDrop:
+	ret
+
+; count items at location dl with ecx
+countItems:
+	mov ecx,0
+	mov esi,items
+countItems_l0:
+	lodsd
+	or eax,eax
+	jz countItems_l0e
+
+	add eax,8
+	mov al,[eax]
+	cmp al,dl
+	jnz countItems_l0
+	inc ecx
+	jmp countItems_l0
+
+countItems_l0e:
+	ret
+
+; list n=ecx items at location dl
+listItems:
+	mov esi,items
+
+listItems_l0:
+	lodsd
+	or eax,eax
+	jz listItems_l0e
+	mov ebx,eax
+	add ebx,8
+	mov bl,[ebx]
+	cmp bl,dl
+	jnz listItems_l0
+
+	add eax,4
+	pusha
+	mov esi,[eax]
+	call printStr
+	popa
+
+	cmp ecx,2
+	ja listItems_l0next
+	jz listItems_l0and
+
+	pusha
+	mov al,','
+	call printChar
+	mov al,' '
+	call printChar
+	popa
+	jmp listItems_l0next
+
+listItems_l0and:
+	pusha
+	mov al,' '
+	call printChar
+	mov esi,wAnd
+	call printStr
+	mov al,' '
+	call printChar
+	popa
+
+listItems_l0next:
+	loop listItems_l0
+listItems_l0e:
+
+	mov al,'.'
+	call printChar
+	mov al,10
+	call printChar
 	ret
 
 ; called after moving
@@ -516,7 +667,7 @@ nothingSpecialMsg:
 	db "You see nothing special about it.",10,0
 youCanGoMsg:
 	db "You could go ",0
-orMsg:
+orSep:
 	db " or ",0
 invalidDirectionMsg:
 	db "That isn't a valid direction.",10,0
@@ -524,6 +675,14 @@ noDirectionMsg:
 	db "You must say which way to go.",10,0
 cantGoThatWayMsg:
 	db "You can't go that way.",10,0
+youSeeHereMsg:
+	db "You see here ",0
+cantPickMsg:
+	db "You could try picking something UP...",10,0
+takenMsg:
+	db "Taken.",10,0
+alreadyHaveMsg:
+	db "You already have that.",10,0
 
 vQuit:
 	db "quit",0
@@ -537,6 +696,10 @@ vMove:
 	db "move",0
 vExit:
 	db "exit",0
+vTake:
+	db "take",0
+vPick:
+	db "pick",0
 wAt:
 	db "at",0
 wAnd:
