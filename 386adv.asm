@@ -447,7 +447,7 @@ look:
 .itemMsgP2:
 	db " here.",10,0
 .orMsg:
-	db " and ",0
+	db " or ",0
 .goMsg:
 	db "You could go ",0
 .darkMsg:
