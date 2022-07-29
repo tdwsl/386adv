@@ -13,6 +13,8 @@ section .text
 global _start
 
 FLAG_DARK equ 1
+FLAG_BEENCOMFORTABLE equ 2
+FLAG_SPECIAL equ 128
 STATUS_LIGHT equ 1
 
 ; entry point
@@ -21,8 +23,10 @@ _start:
 	mov dword [currentLocation],startCabin
 	mov byte [coldResistance],0
 	mov byte [temperatureScore],127
+	mov word [score],0
 	mov byte [status],0
 	mov byte [torchBattery],20
+	mov byte [cookerGas],8
 	mov esi,.welcomeMsg
 	call printStr
 
@@ -63,6 +67,9 @@ mainLoop:
 	call streq
 	jz quit
 	mov edi,.look
+	call streq
+	jz look
+	mov edi,.l
 	call streq
 	jz look
 	mov edi,.examine
@@ -128,6 +135,8 @@ mainLoop:
 	db "q",0
 .look:
 	db "look",0
+.l:
+	db "l",0
 .examine:
 	db "examine",0
 .go:
@@ -241,6 +250,8 @@ alreadyHaveThat: ; "You already have that."
 
 ; called after every turn
 update:
+	; torch
+
 	mov al,[status]
 	and al,STATUS_LIGHT
 	jz .torchOff
@@ -250,6 +261,8 @@ update:
 	call printStr
 	xor byte [status],STATUS_LIGHT
 .torchOff:
+
+	; cold
 
 	mov eax,[currentLocation]
 	add eax,10
@@ -271,20 +284,47 @@ update:
 	ja .notTooBad
 	mov esi,.veryColdMsg
 	call printStr
-	jmp .aOkay
+	jmp .noRestore
 
 .notTooBad:
 	cmp byte [temperatureScore],80
-	ja .aOkay
+	ja .noRestore
 	mov esi,.drowsyMsg
 	call printStr
-
-.aOkay:
 	jmp .noRestore
 
 .restore:
 	mov byte [temperatureScore],127
+
+	mov edx,[currentLocation]
+	add edx,9
+	mov al,FLAG_BEENCOMFORTABLE
+	and al,[edx]
+	jnz .noRestore
+
+	or byte [edx],FLAG_BEENCOMFORTABLE
+	add word [score],7
 .noRestore:
+
+	; cooker
+
+	mov al,[kitchen+9]
+	and al,FLAG_SPECIAL
+	jz .noCooker
+
+	dec byte [cookerGas]
+	jnz .noCooker
+
+	call cookerTurnOff.0
+	mov eax,[currentLocation]
+	mov al,[eax+8]
+	cmp al,[cooker+8]
+	jnz .noCooker
+
+	mov esi,.cookerMsg
+	call printStr
+
+.noCooker:
 
 	ret
 
@@ -297,6 +337,8 @@ update:
 .freezeMsg:
 	db "You collapse. You feel so tired.",10
 	db "The cold sets in, and you slowly drift away...",10,0
+.cookerMsg:
+	db "The cooker runs out of gas.",10,0
 
 ; end the game
 gameOver:
@@ -458,44 +500,40 @@ turn:
 	jz .0
 
 	mov esi,.msg1
-	call printStr
-	ret
+	jmp printStr
 
 .0:
 	mov esi,noun
 	mov edi,.offStr
 	call streq
 
-	pushf
+	pushfd
 	mov edi,noun2
 	call getNext
 	mov al,[noun2]
 	or al,al
-	pop bx
+	pop ebx
 	jz noNoun
 
-	push bx
+	push ebx
 	mov esi,noun2
 	mov edi,noun
 	call strcpy
-	pop bx
+	pop ebx
+	mov [noun2],ebx
 
 	mov esi,noun
-	push bx
 	call findItem
 	or eax,eax
-	pop bx
 	jz noSuchThing
 
-	push bx
 	call itemIsHere
-	pop bx
 	jnz cantSeeThat
 
-	push bx
 	mov ebx,eax
 	add ebx,9+4*3
-	popf
+	push dword [noun2]
+	popfd
 	jnz .on
 	add ebx,4
 .on:
@@ -921,6 +959,8 @@ findItem:
 .e:
 	ret
 
+;;;; START ITEM VERBS ;;;;
+
 defExamine:
 	mov esi,.msg
 	call printStr
@@ -1186,8 +1226,11 @@ putContainer:
 	add edx,8
 	mov dl,[edx]
 	cmp al,dl
+	jz .0
+	cmp al,1
 	jnz examineContainer.closed
 
+.0:
 	mov eax,[noun2]
 
 	; drop
@@ -1220,6 +1263,59 @@ drawerExamine:
 drawerPut:
 	mov eax,drawerContainer
 	jmp putContainer
+
+cookerTurnOn:
+	mov al,[kitchen+9]
+	and al,FLAG_SPECIAL
+	jnz .already
+
+	mov al,[cookerGas]
+	or al,al
+	jz .z
+
+	add byte [kitchen+10],30
+
+	or byte [kitchen+9],FLAG_SPECIAL
+	mov esi,.msg
+	jmp printStr
+
+.z:
+	mov esi,.msgZ
+	jmp printStr
+
+.already:
+	mov esi,.alreadyMsg
+	jmp printStr
+
+.msg:
+	db "The cooker heats up the room.",10,0
+.msgZ:
+	db "It's out of gas.",10,0
+.alreadyMsg:
+	db "It's already on.",10,0
+
+cookerTurnOff:
+	mov al,[kitchen+9]
+	and al,FLAG_SPECIAL
+	jz .not
+
+	mov esi,.msg
+	call printStr
+.0:
+	xor byte [kitchen+9],FLAG_SPECIAL
+	sub byte [kitchen+10],30
+	ret
+
+.not:
+	mov esi,.notMsg
+	jmp printStr
+
+.msg:
+	db "You turn the cooker off.",10,0
+.notMsg:
+	db "It's already off.",10,0
+
+;;;; END ITEM VERBS  ;;;;
 
 ; count items at location dl with ecx
 countItems:
@@ -1546,8 +1642,25 @@ drawer:
 	dd drawerClose
 	dd drawerPut
 
+cooker_name:
+	db "cooker",0
+cooker_title:
+	db "a gas cooker",0
+cooker:
+	dd cooker_name
+	dd cooker_title
+	db 3
+	dd defExamine
+	dd cantTake
+	dd defDrop
+	dd cookerTurnOn
+	dd cookerTurnOff
+	dd cantOpen
+	dd cantClose
+	dd cantPut
+
 items:
-	dd torch,coat,drawer,0
+	dd torch,coat,drawer,cooker,0
 
 containers:
 	dd drawerContainer,0
@@ -1562,7 +1675,11 @@ coldResistance:
 	resb 1
 status:
 	resb 1
+score:
+	resw 1
 torchBattery:
+	resb 1
+cookerGas:
 	resb 1
 
 lineBuf:
