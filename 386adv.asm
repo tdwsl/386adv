@@ -12,10 +12,18 @@
 section .text
 global _start
 
+FLAG_DARK equ 1
+STATUS_LIGHT equ 1
+
 ; entry point
 _start:
 	cld
-	mov esi,welcomeMsg
+	mov dword [currentLocation],startCabin
+	mov byte [coldResistance],0
+	mov byte [temperatureScore],127
+	mov byte [status],0
+	mov byte [torchBattery],20
+	mov esi,.welcomeMsg
 	call printStr
 
 	call printLocTitle
@@ -24,6 +32,11 @@ _start:
 	; exit
 	mov eax,1
 	int 80h
+
+.welcomeMsg:
+	db "-38.6 C Adventure",10
+	db "An ice-cold text adventure for x86 Linux",10
+	db "--",10,0
 
 ; main loop - read line, handle verbs, etc
 mainLoop:
@@ -37,41 +50,74 @@ mainLoop:
 	or al,al
 	jz mainLoop
 
-	mov edi,vQuit
+	mov edi,.quit
 	call streq
 	jz quit
-	
-	push mainLoop
 
-	mov edi,vLook
+	push mainLoop
+	push update
+
+	mov edi,.look
 	call streq
 	jz look
-	mov edi,vExamine
+	mov edi,.examine
 	call streq
 	jz examine
-	mov edi,vGo
+	mov edi,.go
 	call streq
 	jz go
-	mov edi,vMove
+	mov edi,.move
 	call streq
 	jz go
-	mov edi,vExit
+	mov edi,.exit
 	call streq
 	jz go
-	mov edi,vTake
+	mov edi,.take
 	call streq
 	jz take
-	mov edi,vPick
+	mov edi,.pick
 	call streq
 	jz pick
+	mov edi,.turn
+	call streq
+	jz turn
+	mov edi,.switch
+	call streq
+	jz turn
+	mov edi,.drop
+	call streq
+	jz drop
 
-	add esp,4
+	add esp,8
 
 	call dontKnow
 	jmp mainLoop
 
+.quit:
+	db "quit",0
+.look:
+	db "look",0
+.examine:
+	db "examine",0
+.go:
+	db "go",0
+.move:
+	db "move",0
+.exit:
+	db "exit",0
+.take:
+	db "take",0
+.pick:
+	db "pick",0
+.drop:
+	db "drop",0
+.turn:
+	db "turn",0
+.switch:
+	db "switch",0
+
 dontKnow: ; "You don't know how to [verb]."
-	mov esi,dontKnowMsg
+	mov esi,.msg
 	call printStr
 	mov esi,verb
 	call printStr
@@ -81,45 +127,164 @@ dontKnow: ; "You don't know how to [verb]."
 	call printChar
 
 	ret
+.msg:
+	db "You don't know how to ",0
 
 quit:
-	mov esi,quitMsg
+	mov esi,.msg
 	call printStr
 	ret
+.msg:
+	db "Bye-bye!",10,0
 
 noNoun: ; "You can't [verb] nothing!"
-	mov esi,nothingMsgP1
+	mov esi,.msgP1
 	call printStr
 	mov esi,verb
 	call printStr
 
 	mov al,[noun]
 	or al,al
-	jz noNoun_0
+	jz .0
 
 	mov al,' '
 	call printChar
 	mov esi,noun
 	call printStr
-noNoun_0:
-	mov esi,nothingMsgP2
+.0:
+	mov esi,.msgP2
 	call printStr
 	ret
+.msgP1:
+	db "You can't ",0
+.msgP2:
+	db " nothing!",10,0
 
 noSuchThing: ; "You know of no such thing."
-	mov esi,noSuchThingMsg
+	mov esi,.msg
 	call printStr
 	ret
+.msg:
+	db "You know of no such thing.",10,0
 
 cantSeeThat: ; "You can't see that here."
-	mov esi,cantSeeThatMsg
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You can't see that here.",10,0
+
+dontHaveThat: ; "You don't have that."
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You don't have that.",10,0
+
+alreadyHaveThat: ; "You already have that."
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You already have that.",10,0
+
+; called after every turn
+update:
+	mov al,[status]
+	and al,STATUS_LIGHT
+	jz .torchOff
+	dec byte [torchBattery]
+	jnz .torchOff
+	mov esi,.msg1
+	call printStr
+	xor byte [status],STATUS_LIGHT
+
+.torchOff:
+	ret
+
+.msg1:
+	db "The torch dies."
+
+drop:
+	mov edi,noun
+	call getNext
+	mov al,[noun]
+	or al,al
+	jz noNoun
+
+	mov esi,noun
+	call findItem
+	or eax,eax
+	jz noSuchThing
+
+	call itemIsHere
+	jnz cantSeeThat
+
+	mov ebx,eax
+	add ebx,9+4*2
+	jmp [ebx]
+
+turn:
+	mov edi,noun
+	call getNext
+	mov esi,noun
+	mov edi,.offStr
+	call streq
+	jz .0
+	mov edi,.onStr
+	call streq
+	jz .0
+
+	mov esi,.msg1
 	call printStr
 	ret
 
-dontHaveThat: ; "You don't have that."
-	mov esi,dontHaveThatMsg
-	call printStr
-	ret
+.0:
+	mov esi,noun
+	mov edi,.offStr
+	call streq
+
+	pushf
+	mov edi,noun2
+	call getNext
+	mov al,[noun2]
+	or al,al
+	pop bx
+	jz noNoun
+
+	push bx
+	mov esi,noun2
+	mov edi,noun
+	call strcpy
+	pop bx
+
+	mov esi,noun
+	push bx
+	call findItem
+	or eax,eax
+	pop bx
+	jz noSuchThing
+
+	push bx
+	call itemIsHere
+	pop bx
+	jnz cantSeeThat
+
+	push bx
+	mov ebx,eax
+	add ebx,9+4*3
+	popf
+	jnz .on
+	add ebx,4
+.on:
+	jmp [ebx]
+
+.msg1:
+	db "You could try turning something ON or OFF...",10,0
+.offStr:
+	db "off",0
+.onStr:
+	db "on",0
 
 examine:
 	mov edi,noun
@@ -127,7 +292,7 @@ examine:
 	mov al,[noun]
 	or al,al
 	jz noNoun
-examine_0:
+.0:
 
 	mov esi,noun
 	call findItem
@@ -148,24 +313,39 @@ look:
 	mov edi,noun2
 	call getNext
 	mov esi,noun2
-	mov edi,wAt
+	mov edi,.atStr
 	call streq
-	jnz look_0
+	jnz .0
 
 	mov edi,noun
 	call getNext
 	mov al,[noun]
 	or al,al
-	jnz examine_0
+	jnz examine.0
 
 	mov edi,noun
 	mov esi,noun2
 	call strcpy
 	jmp noNoun
 
-look_0:
-	; print desc
+.0:
 	mov eax,[currentLocation]
+	mov ebx,eax
+	add ebx,9
+	mov bl,[ebx]
+	and bl,FLAG_DARK
+	jz .notDark
+	mov bl,[status]
+	and bl,STATUS_LIGHT
+	jnz .notDark
+
+	mov esi,.darkMsg
+	call printStr
+	jmp .noItems
+
+.notDark:
+
+	; print desc
 	mov ebx,eax
 	add ebx,4
 	mov esi,[ebx]
@@ -179,60 +359,62 @@ look_0:
 	mov dl,[eax]
 	call countItems
 	or ecx,ecx
-	jz look_noItems
+	jz .noItems
 
-	push dx
-	mov esi,youSeeHereMsg
+	pusha
+	mov esi,.itemMsgP1
 	call printStr
-	pop dx
+	popa
 	call listItems
+	mov esi,.itemMsgP2
+	call printStr
 
-look_noItems:
+.noItems:
 
 	; count directions
 	mov ecx,10
 	mov edx,0
 	mov esi,[currentLocation]
-	add esi,9
-look_l0:
+	add esi,11
+.l0:
 	lodsd
 	or eax,eax
-	jz look_l0z
+	jz .l0z
 	inc edx
-look_l0z:
-	loop look_l0
+.l0z:
+	loop .l0
 
 	or dl,dl
-	jz look_noexit
+	jz .noexit
 
 	; print directions
 
 	pusha
-	mov esi,youCanGoMsg
+	mov esi,.goMsg
 	call printStr
 	popa
 
 	mov ecx,10
 	mov esi,[currentLocation]
-	add esi,9
-look_l1:
+	add esi,11
+.l1:
 	lodsd
 	or eax,eax
-	jz look_l1n
+	jz .l1n
 
 	pusha
 	mov eax,10
 	sub eax,ecx
 	shl eax,2
-	add eax,directions
+	add eax,findDirection.directions
 	mov esi,[eax]
 	call printStr
 	popa
 
 	dec edx
-	jz look_l1n
+	jz .l1n
 	cmp edx,1
-	jz look_l1and
+	jz .l1and
 
 	pusha
 	mov al,','
@@ -241,62 +423,82 @@ look_l1:
 	call printChar
 	popa
 
-	jmp look_l1n
+	jmp .l1n
 
-look_l1and:
+.l1and:
 	pusha
-	mov esi,orSep
+	mov esi,.orMsg
 	call printStr
 	popa
 
-look_l1n:
-	loop look_l1
+.l1n:
+	loop .l1
 
 	mov al,'.'
 	call printChar
 	mov al,10
 	call printChar
 
-look_noexit:
+.noexit:
 	ret
+
+.itemMsgP1:
+	db "There is ",0
+.itemMsgP2:
+	db " here.",10,0
+.orMsg:
+	db " and ",0
+.goMsg:
+	db "You could go ",0
+.darkMsg:
+	db "It's dark in here - you can't see a thing.",10,0
+.atStr:
+	db "at",0
 
 go:
 	mov edi,noun
 	call getNext
 	mov al,[noun]
 	or al,al
-	jnz go_hasDirection
+	jnz .hasDirection
 
-	mov esi,noDirectionMsg
+	mov esi,.noDirMsg
 	call printStr
 	ret
 
-go_hasDirection:
+.hasDirection:
 	mov esi,noun
 	call findDirection
-	jnz go_validDirection
+	jnz .validDirection
 
-	mov esi,invalidDirectionMsg
+	mov esi,.invalidMsg
 	call printStr
 	ret
 
-go_validDirection:
+.validDirection:
 	shl eax,2
 	add eax,[currentLocation]
-	add eax,9
+	add eax,11
 	mov dl,[eax]
 	or dl,dl
-	jnz go_canGo
+	jnz .canGo
 
-	mov esi,cantGoThatWayMsg
+	mov esi,.noCanDoMsg
 	call printStr
 	ret
 
-go_canGo:
+.canGo:
 	mov eax,[eax]
 	mov dword [currentLocation],eax
 	call printLocTitle
 	ret
+
+.invalidMsg:
+	db "Please specify a cardinal direction.",10,0
+.noDirMsg:
+	db "You must specify which way to go.",10,0
+.noCanDoMsg:
+	db "You can't go that way.",10,0
 
 take:
 	mov edi,noun
@@ -305,7 +507,7 @@ take:
 	or al,al
 	jz noNoun
 
-take_0:
+.0:
 	mov esi,noun
 	call findItem
 	or eax,eax
@@ -315,16 +517,16 @@ take_0:
 	jnz cantSeeThat
 
 	mov ebx,eax
-	add ebx,13
+	add ebx,9+4*1
 	jmp [ebx]
 
 pick:
 	mov edi,noun
 	call getNext
 	mov esi,noun
-	mov edi,dUp
+	mov edi,findDirection.up
 	call streq
-	jnz pick_notUp
+	jnz .notUp
 
 	mov edi,noun2
 	call getNext
@@ -335,33 +537,70 @@ pick:
 	mov esi,noun2
 	mov edi,noun
 	call strcpy
-	jmp take_0
+	jmp take.0
 
-pick_notUp:
-	mov esi,cantPickMsg
+.notUp:
+	mov esi,.notUpMsg
 	call printStr
 	ret
+
+.notUpMsg:
+	db "You could pick something UP...",10,0
 
 ; load direction index into eax
 findDirection:
 	mov edi,esi
 	mov ecx,10
-	mov esi,directions
-
-findDirection_l0:
+	mov esi,.directions
+	mov dl,0
+.l0:
 	lodsd
 	pusha
 	mov esi,eax
 	call streq
 	popa
-	jz findDirection_l0e
-	loop findDirection_l0
-
-findDirection_l0e:
+	jz .l0e
+	loop .l0
+.l0e:
 	mov eax,10
 	sub eax,ecx
+	or dl,dl
+	jnz .again
 	cmp eax,10
 	ret
+
+.again:
+	inc dl
+	mov ecx,10
+	mov esi,.shortDirs
+	jmp .l0
+
+.north: db "north",0
+.east: db "east",0
+.south: db "south",0
+.west: db "west",0
+.northeast: db "northeast",0
+.southeast: db "southeast",0
+.northwest: db "northwest",0
+.southwest: db "southwest",0
+.up: db "up",0
+.down: db "down",0
+.n: db "n",0
+.e: db "e",0
+.s: db "s",0
+.w: db "w",0
+.ne: db "ne",0
+.se: db "se",0
+.nw: db "nw",0
+.sw: db "sw",0
+.u: db "u",0
+.d: db "d",0
+.directions:
+	dd .north,.east,.south,.west
+	dd .northeast,.southeast,.northwest,.southwest
+	dd .up,.down
+.shortDirs:
+	dd .n,.e,.s,.w,.ne,.se,.nw,.sw,.u,.d
 
 ; check if item at eax is in inventory
 hasItem:
@@ -374,9 +613,19 @@ hasItem:
 ; check if item at eax is in current room or inventory
 itemIsHere:
 	call hasItem
-	jnz itemIsHere_0
+	jnz .0
 	ret
-itemIsHere_0:
+.0:
+	mov edx,[currentLocation]
+	add edx,9
+	mov dl,[edx]
+	and dl,FLAG_DARK
+	jz .1
+	mov dl,[status]
+	and dl,STATUS_LIGHT
+	jnz .1
+	ret
+.1:
 	mov edx,[currentLocation]
 	add edx,8
 	mov bh,[edx]
@@ -387,10 +636,10 @@ itemIsHere_0:
 findItem:
 	mov edi,esi
 	mov esi,items
-findItem_l0:
+.l0:
 	lodsd
 	or eax,eax
-	jz findItem_e
+	jz .e
 
 	push edi
 	push esi
@@ -400,67 +649,176 @@ findItem_l0:
 	pop eax
 	pop esi
 	pop edi
-	jnz findItem_l0
-findItem_e:
+	jnz .l0
+.e:
 	ret
 
-; default examine
 defExamine:
-	mov esi,nothingSpecialMsg
+	mov esi,.msg
 	call printStr
 	ret
+.msg:
+	db "You see nothing special about it.",10,0
 
-; default take
 defTake:
+	call hasItem
+	jz alreadyHaveThat
+
 	add eax,8
-	cmp byte [eax],1
-	jz defTake_has
-
 	mov byte [eax],1
-	mov esi,takenMsg
+	mov esi,.msg
 	call printStr
 	ret
-
-defTake_has:
-	mov esi,alreadyHaveMsg
-	call printStr
-	ret
+.msg:
+	db "Taken.",10,0
 
 defDrop:
+	call hasItem
+	jnz dontHaveThat
+
+	mov ebx,[currentLocation]
+	add ebx,8
+	mov bl,[ebx]
+	add eax,8
+	mov [eax],bl
+
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "Dropped.",10,0
+
+defTurnOn:
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You can't turn that on!",10,0
+
+defTurnOff:
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You can't turn that off!",10,0
+
+coatTake:
+	call hasItem
+	jz alreadyHaveThat
+
+	add byte [coldResistance],25
+	call defTake
+
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You put the coat on. You feel warmer.",10,0
+
+coatDrop:
+	call hasItem
+	jnz dontHaveThat
+
+	pusha
+	mov esi,.msg
+	call printStr
+	popa
+
+	sub byte [coldResistance],25
+	jmp defDrop
+.msg:
+	db "It feels colder without the coat.",10,0
+
+torchTurnOn:
+	call hasItem
+	jnz dontHaveThat
+
+	mov al,[torchBattery]
+	or al,al
+	jnz .notDead
+	mov esi,.deadMsg
+	call printStr
+	ret
+
+.notDead:
+	mov al,[status]
+	and al,STATUS_LIGHT
+	jz .notOn
+	mov esi,.alreadyMsg
+	call printStr
+	ret
+
+.notOn:
+	or byte [status],STATUS_LIGHT
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You turn the torch on.",10,0
+.deadMsg:
+	db "It's dead.",10,0
+.alreadyMsg:
+	db "It's already on.",10,0
+
+torchTurnOff:
+	call hasItem
+	jnz dontHaveThat
+
+	mov al,[status]
+	and al,STATUS_LIGHT
+	jnz .notOff
+	mov esi,.alreadyMsg
+	call printStr
+	ret
+
+.notOff:
+	xor byte [status],STATUS_LIGHT
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You turn the torch off.",10,0
+.alreadyMsg:
+	db "It's already off.",10,0
+
+torchDrop:
+	call defDrop
+	xor byte [status],STATUS_LIGHT
 	ret
 
 ; count items at location dl with ecx
 countItems:
 	mov ecx,0
 	mov esi,items
-countItems_l0:
+.l0:
 	lodsd
 	or eax,eax
-	jz countItems_l0e
+	jz .l0e
 
 	add eax,8
 	mov al,[eax]
 	cmp al,dl
-	jnz countItems_l0
+	jnz .l0
 	inc ecx
-	jmp countItems_l0
+	jmp .l0
 
-countItems_l0e:
+.l0e:
 	ret
 
 ; list n=ecx items at location dl
 listItems:
 	mov esi,items
+	mov dh,1
 
-listItems_l0:
+.l0:
 	lodsd
 	or eax,eax
-	jz listItems_l0e
+	jz .l0e
 	mov ebx,eax
 	add ebx,8
 	mov bl,[ebx]
 	cmp bl,dl
-	jnz listItems_l0
+	jnz .l0
 
 	add eax,4
 	pusha
@@ -469,8 +827,8 @@ listItems_l0:
 	popa
 
 	cmp ecx,2
-	ja listItems_l0next
-	jz listItems_l0and
+	jz .l0and
+	jb .l0next
 
 	pusha
 	mov al,','
@@ -478,27 +836,35 @@ listItems_l0:
 	mov al,' '
 	call printChar
 	popa
-	jmp listItems_l0next
+	inc dh
+	jmp .l0next
 
-listItems_l0and:
+.l0and:
 	pusha
-	mov al,' '
-	call printChar
-	mov esi,wAnd
+	mov esi,.andSep
 	call printStr
-	mov al,' '
-	call printChar
 	popa
+	inc dh
 
-listItems_l0next:
-	loop listItems_l0
-listItems_l0e:
+.l0next:
+	cmp dh,4
+	jnz .l0next0
+	cmp ecx,1
+	jz .l0next0
 
-	mov al,'.'
-	call printChar
+	mov dh,0
+	pusha
 	mov al,10
 	call printChar
+	popa
+.l0next0:
+	loop .l0
+
+.l0e:
 	ret
+
+.andSep:
+	db " and ",0
 
 ; called after moving
 printLocTitle:
@@ -526,14 +892,14 @@ strcpy:
 streq:
 	push esi
 	mov ecx,-1
-streq_l0:
+.l0:
 	cmpsb
-	jnz streq_l0e
+	jnz .l0e
 	mov eax,esi
 	dec eax
 	cmp byte [eax],0
-	jnz streq_l0
-streq_l0e:
+	jnz .l0
+.l0e:
 	pop esi
 	ret
 
@@ -543,39 +909,39 @@ readLine:
 	call printChar
 
 	mov ecx,lineBuf
-readLine_l0:
+.l0:
 	mov eax,3
 	mov ebx,2
 	mov edx,1
 	int 80h
 
 	cmp ecx,lineBuf+99
-	jz readLine_l0e
+	jz .l0e
 	mov al,[ecx]
 	cmp al,9
-	jz readLine_l0n
+	jz .l0n
 	cmp al,31
-	jb readLine_l0e
-readLine_l0n:
+	jb .l0e
+.l0n:
 	inc ecx
-	jmp readLine_l0
-readLine_l0e:
+	jmp .l0
+.l0e:
 
 	mov esi,lineBuf
 	mov edi,lineBuf
-readLine_l1:
+.l1:
 	lodsb
 	or al,al
-	jz readLine_l1e
+	jz .l1e
 	cmp al,'A'
-	jb readLine_l1n
+	jb .l1n
 	cmp al,'Z'
-	ja readLine_l1n
+	ja .l1n
 	add al,20h
-readLine_l1n:
+.l1n:
 	stosb
-	jmp readLine_l1
-readLine_l1e:
+	jmp .l1
+.l1e:
 
 	mov byte [ecx],0
 	mov dword [nextWord],lineBuf
@@ -586,21 +952,21 @@ getNext:
 	push edi
 	mov edi,[nextWord]
 	mov al,33
-getNext_l0:
+.l0:
 	scasb
-	jb getNext_l0
+	jb .l0
 
 	mov ecx,edi
 	pop edi
 	sub ecx,[nextWord]
 	dec ecx
-	jnz getNext_NZ
+	jnz .NZ
 
 	mov al,0
 	stosb
 	ret
 
-getNext_NZ:
+.NZ:
 	mov esi,[nextWord]
 	rep movsb
 	mov al,0
@@ -608,9 +974,9 @@ getNext_NZ:
 
 	lodsb
 	or al,al
-	jnz getNext_neol
+	jnz .neol
 	dec esi
-getNext_neol:
+.neol:
 	mov [nextWord],esi
 
 	ret
@@ -643,159 +1009,88 @@ printStr:
 
 section .data
 
-welcomeMsg:
-	db "-38.6 C Adventure",10
-	db "An ice-cold text adventure for x86 Linux",10
-	db "--",10,0
-quitMsg:
-	db "Bye-bye!",10,0
-dontKnowMsg:
-	db "You don't know how to ",0
-nothingMsgP1:
-	db "You can't ",0
-nothingMsgP2:
-	db " nothing!",10,0
-noSuchThingMsg:
-	db "You know of no such thing.",10,0
-cantSeeThatMsg:
-	db "You can't see that here.",10,0
-dontHaveThatMsg:
-	db "You don't have that.",10,0
-alreadyHaveThatMsg:
-	db "You already have that.",10,0
-nothingSpecialMsg:
-	db "You see nothing special about it.",10,0
-youCanGoMsg:
-	db "You could go ",0
-orSep:
-	db " or ",0
-invalidDirectionMsg:
-	db "That isn't a valid direction.",10,0
-noDirectionMsg:
-	db "You must say which way to go.",10,0
-cantGoThatWayMsg:
-	db "You can't go that way.",10,0
-youSeeHereMsg:
-	db "You see here ",0
-cantPickMsg:
-	db "You could try picking something UP...",10,0
-takenMsg:
-	db "Taken.",10,0
-alreadyHaveMsg:
-	db "You already have that.",10,0
-
-vQuit:
-	db "quit",0
-vLook:
-	db "look",0
-vExamine:
-	db "examine",0
-vGo:
-	db "go",0
-vMove:
-	db "move",0
-vExit:
-	db "exit",0
-vTake:
-	db "take",0
-vPick:
-	db "pick",0
-wAt:
-	db "at",0
-wAnd:
-	db "and",0
-
-dNorth:
-	db "north",0
-dEast:
-	db "east",0
-dSouth:
-	db "south",0
-dWest:
-	db "west",0
-dNortheast:
-	db "northeast",0
-dSoutheast:
-	db "southeast",0
-dNorthwest:
-	db "northwest",0
-dSouthwest:
-	db "southwest",0
-dUp:
-	db "up",0
-dDown:
-	db "down",0
-
-directions:
-	dd dNorth,dEast,dSouth,dWest
-	dd dNortheast,dSoutheast,dNorthwest,dSouthwest
-	dd dUp,dDown
-
-sdN:
-	db "n",0
-sdE:
-	db "e",0
-sdS:
-	db "s",0
-sdW:
-	db "w",0
-sdNE:
-	db "ne",0
-sdSE:
-	db "se",0
-sdNW:
-	db "nw",0
-sdSW:
-	db "sw",0
-sdU:
-	db "u",0
-sdD:
-	db "d",0
-
-shortDirections:
-	dd sdN,sdE,sdS,sdW,sdNE,sdSE,sdNW,sdSW,sdU,sdD
-
-currentLocation:
-	dd lStartCabin
-
-lStartCabin_title:
+startCabin_title:
 	db "Your Cabin",0
-lStartCabin_desc:
+startCabin_desc:
 	db "The inside of your cabin. The power is out, and it is absolutely "
 	db "freezing.",0
-lStartCabin:
-	dd lStartCabin_title
-	dd lStartCabin_desc
+startCabin:
+	dd startCabin_title
+	dd startCabin_desc
 	db 2 ; id
-        ;  n,e,s,w,       ne,se,nw,sw,u,d
-	dd 0,0,0,lKitchen,0, 0, 0, 0, 0,0
+	db 0 ; flags
+	db -20 ; temperature
+        ;  n,e,      s,w,       ne,se,nw,sw,u,d
+	dd 0,closet,0,kitchen,0, 0, 0, 0, 0,0
 
-lKitchen_title:
+kitchen_title:
 	db "Kitchen",0
-lKitchen_desc:
+kitchen_desc:
 	db "The windows of the kitchen are iced over.",0
-lKitchen:
-	dd lKitchen_title
-	dd lKitchen_desc
+kitchen:
+	dd kitchen_title
+	dd kitchen_desc
 	db 3
-	dd 0,lStartCabin,0,0,0,0,0,0,0,0
+	db 0
+	db -25
+	dd 0,startCabin,0,0,0,0,0,0,0,0
 
-iTorch_name:
+closet_title:
+	db "Closet",0
+closet_desc:
+	db "The closet is quite small, with wood-panel walling. You can feel "
+	db "a draft.",0
+closet:
+	dd closet_title
+	dd closet_desc
+	db 4
+	db 1
+	db -20
+	dd 0,0,0,startCabin,0,0,0,0,0,0
+
+torch_name:
 	db "torch",0
-iTorch_title:
+torch_title:
 	db "a torch",0
-iTorch:
-	dd iTorch_name
-	dd iTorch_title
+torch:
+	dd torch_name
+	dd torch_title
 	db 2
 	dd defExamine
 	dd defTake
-	dd defDrop
+	dd torchDrop
+	dd torchTurnOn
+	dd torchTurnOff
+
+coat_name:
+	db "coat",0
+coat_title:
+	db "a coat",0
+coat:
+	dd coat_name
+	dd coat_title
+	db 4
+	dd defExamine
+	dd coatTake
+	dd coatDrop
+	dd defTurnOn
+	dd defTurnOff
 
 items:
-	dd iTorch,0
+	dd torch,coat,0
 
 section .bss
+
+currentLocation:
+	resd 1
+temperatureScore:
+	resb 1
+coldResistance:
+	resb 1
+status:
+	resb 1
+torchBattery:
+	resb 1
 
 lineBuf:
 	resb 100
