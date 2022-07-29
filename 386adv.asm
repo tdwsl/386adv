@@ -96,6 +96,9 @@ mainLoop:
 	mov edi,.close
 	call streq
 	jz close
+	mov edi,.put
+	call streq
+	jz put
 
 	add esp,8
 
@@ -130,6 +133,8 @@ mainLoop:
 	db "open",0
 .close:
 	db "close",0
+.put:
+	db "put",0
 
 dontKnow: ; "You don't know how to [verb]."
 	mov esi,.msg
@@ -280,12 +285,13 @@ gameOver:
 .msg:
 	db "[Game Over]",10,0
 
-; get the next item and verify it
+; get the next noun and verify it
 getItem:
 	push .e
 
 	mov edi,noun
 	call getNext
+.0:
 	mov al,[noun]
 	or al,al
 	jz noNoun
@@ -301,6 +307,67 @@ getItem:
 .e:
 	add esp,4
 	ret
+
+put:
+	call getItem
+	call hasItem
+	jnz dontHaveThat
+
+	push eax
+
+	mov esi,noun
+	mov edi,noun2
+	call strcpy
+
+	mov edi,noun
+	call getNext
+	mov esi,noun
+	mov edi,look.inStr
+	call streq
+
+	pop eax
+	jz .in
+
+	mov esi,.noInMsgP1
+	call printStr
+	mov esi,noun2
+	call printStr
+	mov esi,.noInMsgP2
+	call printStr
+	ret
+
+.in:
+	push eax
+
+	mov esi,noun2
+	mov edi,noun
+	call strcpy
+
+	mov al,[noun]
+	or al,al
+	jnz .has2
+
+	pop eax
+	mov esi,.whatMsg
+	call printStr
+	ret
+
+.has2:
+	call getItem.0
+
+	mov ebx,eax
+	pop eax
+
+	mov edx,eax
+	add edx,9+4*7
+	jmp [edx]
+
+.noInMsgP1:
+	db "You could try putting the ",0
+.noInMsgP2:
+	db " IN something...",10,0
+.whatMsg:
+	db "You can't put it in nothing!",10,0
 
 open:
 	call getItem
@@ -748,6 +815,28 @@ itemIsHere:
 	add edx,8
 	mov bh,[edx]
 	cmp bh,bl
+	jnz .2
+	ret
+
+.2:
+	mov esi,containers
+	push eax
+.l0:
+	lodsd
+	or eax,eax
+	jz .l0e
+
+	mov dx,[eax]
+	cmp dh,bh
+	jnz .l0
+	cmp dl,bl
+	jnz .l0
+
+	pop eax
+	ret
+.l0e:
+	pop eax
+	cmp esi,0
 	ret
 
 ; load ptr to item where name=esi into eax
@@ -804,7 +893,7 @@ defDrop:
 	call printStr
 	ret
 .msg:
-	db "Dropped.",10,0
+	db "Done.",10,0
 
 cantTake:
 	mov esi,.msg
@@ -840,6 +929,13 @@ cantTurnOff:
 	ret
 .msg:
 	db "You can't turn that off!",10,0
+
+cantPut:
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You can't put something in that!",10,0
 
 coatTake:
 	call hasItem
@@ -1012,6 +1108,42 @@ examineContainer:
 .emptyMsg:
 	db "It's empty.",10,0
 
+; put ebx in container eax
+putContainer:
+	push eax
+	mov eax,ebx
+	call hasItem
+	pop ebx
+	jnz dontHaveThat
+	xchg eax,ebx
+
+	; check if open
+	push eax
+	inc eax
+	mov al,[eax]
+	mov edx,[currentLocation]
+	add edx,8
+	mov dl,[edx]
+	cmp al,dl
+	pop eax
+	jnz examineContainer.closed
+
+	; drop
+	push eax
+	push ebx
+	mov eax,ebx
+	add ebx,9+4*2
+	call [ebx]
+	pop eax
+	pop ebx
+
+	; put
+	add ebx,8
+	mov al,[eax]
+	mov [ebx],al
+
+	ret
+
 drawerOpen:
 	mov eax,drawerContainer
 	jmp openContainer
@@ -1023,6 +1155,10 @@ drawerClose:
 drawerExamine:
 	mov eax,drawerContainer
 	jmp examineContainer
+
+drawerPut:
+	mov eax,drawerContainer
+	jmp putContainer
 
 ; count items at location dl with ecx
 countItems:
@@ -1301,6 +1437,7 @@ torch:
 	dd torchTurnOff
 	dd cantOpen
 	dd cantClose
+	dd cantPut
 
 coat_name:
 	db "coat",0
@@ -1317,6 +1454,7 @@ coat:
 	dd cantTurnOff
 	dd cantOpen
 	dd cantClose
+	dd cantPut
 
 drawerContainer:
 	db 5 ; container id (overlaps with room id)
@@ -1337,6 +1475,7 @@ drawer:
 	dd cantTurnOff
 	dd drawerOpen
 	dd drawerClose
+	dd drawerPut
 
 items:
 	dd torch,coat,drawer,0
