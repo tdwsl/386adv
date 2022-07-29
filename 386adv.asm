@@ -87,6 +87,9 @@ mainLoop:
 	mov edi,.drop
 	call streq
 	jz drop
+	mov edi,.wait
+	call streq
+	jz passTime
 
 	add esp,8
 
@@ -115,6 +118,8 @@ mainLoop:
 	db "turn",0
 .switch:
 	db "switch",0
+.wait:
+	db "wait",0
 
 dontKnow: ; "You don't know how to [verb]."
 	mov esi,.msg
@@ -135,7 +140,7 @@ quit:
 	call printStr
 	ret
 .msg:
-	db "Bye-bye!",10,0
+	db "Stay frosty!",10,0
 
 noNoun: ; "You can't [verb] nothing!"
 	mov esi,.msgP1
@@ -195,15 +200,75 @@ update:
 	jz .torchOff
 	dec byte [torchBattery]
 	jnz .torchOff
-	mov esi,.msg1
+	mov esi,.torchMsg
 	call printStr
 	xor byte [status],STATUS_LIGHT
-
 .torchOff:
+
+	mov eax,[currentLocation]
+	add eax,10
+	mov al,[eax]
+	add al,[coldResistance]
+	cmp al,128
+	jb .restore
+
+	add byte [temperatureScore],al
+	cmp byte [temperatureScore],128
+	jb .alive
+
+	mov esi,.freezeMsg
+	call printStr
+	jmp gameOver
+
+.alive:
+	cmp byte [temperatureScore],40
+	ja .notTooBad
+	mov esi,.veryColdMsg
+	call printStr
+	jmp .aOkay
+
+.notTooBad:
+	cmp byte [temperatureScore],80
+	ja .aOkay
+	mov esi,.drowsyMsg
+	call printStr
+
+.aOkay:
+	jmp .noRestore
+
+.restore:
+	mov byte [temperatureScore],127
+.noRestore:
+
 	ret
 
-.msg1:
-	db "The torch dies."
+.torchMsg:
+	db "The torch dies.",0
+.drowsyMsg:
+	db "You feel drowsy.",10,0
+.veryColdMsg:
+	db "It's so cold...",10,0
+.freezeMsg:
+	db "You collapse. You feel so, so tired. The cold sets in, and you "
+	db "slowly drift",10
+	db "away...",10,0
+
+; end the game
+gameOver:
+	mov esi,.msg
+	call printStr
+
+	mov eax,1
+	int 80h
+.msg:
+	db "[Game Over]",10,0
+
+passTime:
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You wait.",10,0
 
 drop:
 	mov edi,noun
