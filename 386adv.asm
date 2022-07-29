@@ -117,6 +117,9 @@ mainLoop:
 	mov edi,.i
 	call streq
 	jz takeInventory
+	mov edi,.score
+	call streq
+	jz currentScore
 
 	; directions
 	call findDirection
@@ -167,6 +170,8 @@ mainLoop:
 	db "inventory",0
 .i:
 	db "i",0
+.score:
+	db "score",0
 
 dontKnow: ; "You don't know how to [verb]."
 	mov esi,.msg
@@ -182,7 +187,23 @@ dontKnow: ; "You don't know how to [verb]."
 .msg:
 	db "You don't know how to ",0
 
+finalScore:
+	mov esi,.msg1
+	call printStr
+	mov ax,[score]
+	cwde
+	call printNum
+	mov esi,.msg2
+	call printStr
+	ret
+.msg1:
+	db "Your final score is ",0
+.msg2:
+	db " points.",10,0
+
 quit:
+	call finalScore
+
 	mov esi,.msg
 	add esp,8
 	jmp printStr
@@ -345,10 +366,26 @@ gameOver:
 	mov esi,.msg
 	call printStr
 
+	call finalScore
+
 	mov eax,1
 	int 80h
 .msg:
 	db "Game Over",10,0
+
+currentScore:
+	mov esi,.msg1
+	call printStr
+	mov ax,[score]
+	cwde
+	call printNum
+	mov esi,.msg2
+	call printStr
+	ret
+.msg1:
+	db "Your current score is ",0
+.msg2:
+	db " points.",10,0
 
 ; get the next noun and verify it
 getItem:
@@ -1520,6 +1557,48 @@ getNext:
 
 	ret
 
+; print number in eax
+printNum:
+	cmp eax,-1
+	jb .pos
+
+	neg eax
+	push eax
+	mov al,'-'
+	call printChar
+	pop eax
+.pos:
+
+	mov edi,buf
+	mov ebx,10
+.l0:
+	mov edx,0
+	div ebx
+
+	push ax
+	mov al,dl
+	add al,'0'
+	stosb
+	pop ax
+
+	or eax,eax
+	jnz .l0
+
+	mov ecx,edi
+	sub ecx,buf
+	mov esi,edi
+	dec esi
+	std
+.l2:
+	lodsb
+	pusha
+	call printChar
+	popa
+	loop .l2
+
+	cld
+	ret
+
 ; print char in al
 printChar:
 	mov [cbuf],al
@@ -1686,6 +1765,8 @@ lineBuf:
 	resb 100
 cbuf:
 	resb 1
+buf:
+	resb 100
 
 verb:
 	resb 100
