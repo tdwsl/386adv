@@ -90,6 +90,12 @@ mainLoop:
 	mov edi,.wait
 	call streq
 	jz passTime
+	mov edi,.open
+	call streq
+	jz open
+	mov edi,.close
+	call streq
+	jz close
 
 	add esp,8
 
@@ -120,6 +126,10 @@ mainLoop:
 	db "switch",0
 .wait:
 	db "wait",0
+.open:
+	db "open",0
+.close:
+	db "close",0
 
 dontKnow: ; "You don't know how to [verb]."
 	mov esi,.msg
@@ -165,12 +175,20 @@ noNoun: ; "You can't [verb] nothing!"
 .msgP2:
 	db " nothing!",10,0
 
-noSuchThing: ; "You know of no such thing."
+noSuchThing: ; "[noun]? What's that?"
+	cmp byte [noun],'a'
+	jb .0
+	cmp byte [noun],'z'
+	ja .0
+	sub byte [noun],20h
+.0:
+	mov esi,noun
+	call printStr
 	mov esi,.msg
 	call printStr
 	ret
 .msg:
-	db "You know of no such thing.",10,0
+	db "? What's that?",10,0
 
 cantSeeThat: ; "You can't see that here."
 	mov esi,.msg
@@ -249,9 +267,8 @@ update:
 .veryColdMsg:
 	db "It's so cold...",10,0
 .freezeMsg:
-	db "You collapse. You feel so, so tired. The cold sets in, and you "
-	db "slowly drift",10
-	db "away...",10,0
+	db "You collapse. You feel so tired.",10
+	db "The cold sets in, and you slowly drift away...",10,0
 
 ; end the game
 gameOver:
@@ -263,14 +280,10 @@ gameOver:
 .msg:
 	db "[Game Over]",10,0
 
-passTime:
-	mov esi,.msg
-	call printStr
-	ret
-.msg:
-	db "You wait.",10,0
+; get the next item and verify it
+getItem:
+	push .e
 
-drop:
 	mov edi,noun
 	call getNext
 	mov al,[noun]
@@ -285,6 +298,29 @@ drop:
 	call itemIsHere
 	jnz cantSeeThat
 
+.e:
+	add esp,4
+	ret
+
+open:
+	call getItem
+	add eax,9+4*5
+	jmp [eax]
+
+close:
+	call getItem
+	add eax,9+4*6
+	jmp [eax]
+
+passTime:
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You wait.",10,0
+
+drop:
+	call getItem
 	mov ebx,eax
 	add ebx,9+4*2
 	jmp [ebx]
@@ -380,8 +416,17 @@ look:
 	mov esi,noun2
 	mov edi,.atStr
 	call streq
-	jnz .0
+	jz .at
+	mov edi,.inStr
+	call streq
+	jz .at
+	mov edi,.insideStr
+	call streq
+	jz .at
 
+	jmp .around
+
+.at:
 	mov edi,noun
 	call getNext
 	mov al,[noun]
@@ -393,7 +438,7 @@ look:
 	call strcpy
 	jmp noNoun
 
-.0:
+.around:
 	mov eax,[currentLocation]
 	mov ebx,eax
 	add ebx,9
@@ -519,6 +564,10 @@ look:
 	db "It's dark in here - you can't see a thing.",10,0
 .atStr:
 	db "at",0
+.inStr:
+	db "in",0
+.insideStr:
+	db "inside",0
 
 go:
 	mov edi,noun
@@ -559,7 +608,7 @@ go:
 	ret
 
 .invalidMsg:
-	db "Please specify a cardinal direction.",10,0
+	db "That isn't a valid direction.",10,0
 .noDirMsg:
 	db "You must specify which way to go.",10,0
 .noCanDoMsg:
@@ -629,9 +678,13 @@ findDirection:
 .l0e:
 	mov eax,10
 	sub eax,ecx
-	or dl,dl
-	jnz .again
 	cmp eax,10
+	jnz .end
+
+	or dl,dl
+	jz .again
+	cmp eax,10
+.end:
 	ret
 
 .again:
@@ -753,14 +806,35 @@ defDrop:
 .msg:
 	db "Dropped.",10,0
 
-defTurnOn:
+cantTake:
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You can't take that!",10,0
+
+cantOpen:
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You can't open that!",10,0
+
+cantClose:
+	mov esi,.msg
+	call printStr
+	ret
+.msg:
+	db "You can't close that!",10,0
+
+cantTurnOn:
 	mov esi,.msg
 	call printStr
 	ret
 .msg:
 	db "You can't turn that on!",10,0
 
-defTurnOff:
+cantTurnOff:
 	mov esi,.msg
 	call printStr
 	ret
@@ -850,6 +924,105 @@ torchDrop:
 	call defDrop
 	xor byte [status],STATUS_LIGHT
 	ret
+
+; open container at eax
+openContainer:
+	inc eax
+	mov ebx,[currentLocation]
+	add ebx,8
+	mov bl,[ebx]
+	cmp [eax],bl
+	jz .already
+
+	mov [eax],bl
+	mov esi,.msg
+	call printStr
+	ret
+.already:
+	mov esi,.alreadyMsg
+	call printStr
+	ret
+.msg:
+	db "Open.",10,0
+.alreadyMsg:
+	db "It's already open.",10,0
+
+; close container at eax
+closeContainer:
+	inc eax
+	mov ebx,[currentLocation]
+	add ebx,8
+	mov bl,[ebx]
+	cmp [eax],bl
+	jnz .already
+
+	mov byte [eax],0
+	mov esi,.msg
+	call printStr
+	ret
+.already:
+	mov esi,.alreadyMsg
+	call printStr
+	ret
+.msg:
+	db "Closed.",10,0
+.alreadyMsg:
+	db "It's already closed.",10,0
+
+; list items in a container
+examineContainer:
+	mov dl,[eax]
+	inc eax
+	mov dh,[eax]
+	mov ebx,[currentLocation]
+	add ebx,8
+	cmp dh,[ebx]
+	jnz .closed
+
+	call countItems
+	or ecx,ecx
+	jz .empty
+
+	pusha
+	mov esi,.msgP1
+	call printStr
+	popa
+
+	call listItems
+	mov al,'.'
+	call printChar
+	mov al,10
+	call printChar
+	ret
+
+.closed:
+	mov esi,.closedMsg
+	call printStr
+	ret
+
+.empty:
+	mov esi,.emptyMsg
+	call printStr
+	ret
+
+.msgP1:
+	db "Inside is ",0
+.closedMsg:
+	db "It's closed.",10,0
+.emptyMsg:
+	db "It's empty.",10,0
+
+drawerOpen:
+	mov eax,drawerContainer
+	jmp openContainer
+
+drawerClose:
+	mov eax,drawerContainer
+	jmp closeContainer
+
+drawerExamine:
+	mov eax,drawerContainer
+	jmp examineContainer
 
 ; count items at location dl with ecx
 countItems:
@@ -1120,12 +1293,14 @@ torch_title:
 torch:
 	dd torch_name
 	dd torch_title
-	db 2
+	db 5
 	dd defExamine
 	dd defTake
 	dd torchDrop
 	dd torchTurnOn
 	dd torchTurnOff
+	dd cantOpen
+	dd cantClose
 
 coat_name:
 	db "coat",0
@@ -1138,11 +1313,36 @@ coat:
 	dd defExamine
 	dd coatTake
 	dd coatDrop
-	dd defTurnOn
-	dd defTurnOff
+	dd cantTurnOn
+	dd cantTurnOff
+	dd cantOpen
+	dd cantClose
+
+drawerContainer:
+	db 5 ; container id (overlaps with room id)
+	db 0 ; current room id
+
+drawer_name:
+	db "drawer",0
+drawer_title:
+	db "a wooden drawer",0
+drawer:
+	dd drawer_name
+	dd drawer_title
+	db 3
+	dd drawerExamine
+	dd cantTake
+	dd defDrop
+	dd cantTurnOn
+	dd cantTurnOff
+	dd drawerOpen
+	dd drawerClose
 
 items:
-	dd torch,coat,0
+	dd torch,coat,drawer,0
+
+containers:
+	dd drawerContainer,0
 
 section .bss
 
