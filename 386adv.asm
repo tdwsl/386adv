@@ -26,7 +26,9 @@ _start:
 	mov esi,.welcomeMsg
 	call printStr
 
-	call printLocTitle
+	mov esi,[currentLocation]
+	mov esi,[esi]
+	call printStr
 	call mainLoop
 
 	; exit
@@ -50,13 +52,16 @@ mainLoop:
 	or al,al
 	jz mainLoop
 
-	mov edi,.quit
-	call streq
-	jz quit
-
 	push mainLoop
 	push update
 
+	; verbs
+	mov edi,.quit
+	call streq
+	jz quit
+	mov edi,.q
+	call streq
+	jz quit
 	mov edi,.look
 	call streq
 	jz look
@@ -99,6 +104,18 @@ mainLoop:
 	mov edi,.put
 	call streq
 	jz put
+	mov edi,.inventory
+	call streq
+	jz takeInventory
+	mov edi,.i
+	call streq
+	jz takeInventory
+
+	; directions
+	call findDirection
+	jz .notDir
+	jmp go.validDirection
+.notDir:
 
 	add esp,8
 
@@ -107,6 +124,8 @@ mainLoop:
 
 .quit:
 	db "quit",0
+.q:
+	db "q",0
 .look:
 	db "look",0
 .examine:
@@ -135,6 +154,10 @@ mainLoop:
 	db "close",0
 .put:
 	db "put",0
+.inventory:
+	db "inventory",0
+.i:
+	db "i",0
 
 dontKnow: ; "You don't know how to [verb]."
 	mov esi,.msg
@@ -152,8 +175,8 @@ dontKnow: ; "You don't know how to [verb]."
 
 quit:
 	mov esi,.msg
-	call printStr
-	ret
+	add esp,8
+	jmp printStr
 .msg:
 	db "Stay frosty!",10,0
 
@@ -268,7 +291,7 @@ update:
 .torchMsg:
 	db "The torch dies.",0
 .drowsyMsg:
-	db "You feel drowsy.",10,0
+	db "You feel tired.",10,0
 .veryColdMsg:
 	db "It's so cold...",10,0
 .freezeMsg:
@@ -283,7 +306,7 @@ gameOver:
 	mov eax,1
 	int 80h
 .msg:
-	db "[Game Over]",10,0
+	db "Game Over",10,0
 
 ; get the next noun and verify it
 getItem:
@@ -291,7 +314,6 @@ getItem:
 
 	mov edi,noun
 	call getNext
-.0:
 	mov al,[noun]
 	or al,al
 	jz noNoun
@@ -308,64 +330,96 @@ getItem:
 	add esp,4
 	ret
 
+takeInventory:
+	mov dl,1
+	call countItems
+	or ecx,ecx
+	jz .z
+
+	push ecx
+	mov esi,.msg1
+	call printStr
+	pop ecx
+	mov dl,1
+
+	call listItems
+
+	mov esi,.msg2
+	jmp printStr
+
+.z:
+	mov esi,.msgZ
+	jmp printStr
+
+.msg1:
+	db "You have ",0
+.msg2:
+	db ".",10,0
+.msgZ:
+	db "You don't have anything.",10,0
+
+; put x in y
 put:
-	call getItem
-	call hasItem
-	jnz dontHaveThat
+	mov edi,noun
+	call getNext
+	mov al,[noun]
+	or al,al
+	jnz .0
 
-	push eax
+	mov esi,.nothingNothingMsg
+	jmp printStr
 
+.0:
 	mov esi,noun
-	mov edi,noun2
-	call strcpy
+	call findItem
+	or eax,eax
+	jz noSuchThing
+
+	call itemIsHere
+	jnz cantSeeThat
+
+	mov [noun2],eax ; temp storage
 
 	mov edi,noun
 	call getNext
 	mov esi,noun
 	mov edi,look.inStr
 	call streq
+	jz .1
 
-	pop eax
-	jz .in
+	mov esi,.noInMsg
+	jmp printStr
 
-	mov esi,.noInMsgP1
-	call printStr
-	mov esi,noun2
-	call printStr
-	mov esi,.noInMsgP2
-	call printStr
-	ret
-
-.in:
-	push eax
-
-	mov esi,noun2
+.1:
 	mov edi,noun
-	call strcpy
-
+	call getNext
 	mov al,[noun]
 	or al,al
-	jnz .has2
+	jnz .2
 
-	pop eax
 	mov esi,.whatMsg
-	call printStr
-	ret
+	jmp printStr
 
-.has2:
-	call getItem.0
+.2:
+	mov esi,noun
+	call findItem
+	or eax,eax
+	jz noSuchThing
 
-	mov ebx,eax
-	pop eax
+	call itemIsHere
+	jnz cantSeeThat
 
+	; call
+
+	mov ebx,[noun2]
 	mov edx,eax
 	add edx,9+4*7
 	jmp [edx]
 
-.noInMsgP1:
-	db "You could try putting the ",0
-.noInMsgP2:
-	db " IN something...",10,0
+.nothingNothingMsg:
+	db "You can't put nothing in nothing!",10,0
+.noInMsg:
+	db "You could try putting something IN something...",0
 .whatMsg:
 	db "You can't put it in nothing!",10,0
 
@@ -671,7 +725,9 @@ go:
 .canGo:
 	mov eax,[eax]
 	mov dword [currentLocation],eax
-	call printLocTitle
+	mov esi,[currentLocation]
+	mov esi,[esi]
+	call printStr
 	ret
 
 .invalidMsg:
@@ -687,6 +743,11 @@ take:
 	mov al,[noun]
 	or al,al
 	jz noNoun
+
+	mov esi,noun
+	mov edi,mainLoop.inventory
+	call streq
+	jz takeInventory
 
 .0:
 	mov esi,noun
@@ -1110,32 +1171,32 @@ examineContainer:
 
 ; put ebx in container eax
 putContainer:
-	push eax
+	mov [noun2],eax
 	mov eax,ebx
 	call hasItem
-	pop ebx
 	jnz dontHaveThat
-	xchg eax,ebx
+
+	mov ebx,eax
+	mov eax,[noun2]
 
 	; check if open
-	push eax
 	inc eax
 	mov al,[eax]
 	mov edx,[currentLocation]
 	add edx,8
 	mov dl,[edx]
 	cmp al,dl
-	pop eax
 	jnz examineContainer.closed
 
+	mov eax,[noun2]
+
 	; drop
-	push eax
-	push ebx
 	mov eax,ebx
 	add ebx,9+4*2
+	push eax
 	call [ebx]
-	pop eax
 	pop ebx
+	mov eax,[noun2]
 
 	; put
 	add ebx,8
@@ -1239,19 +1300,6 @@ listItems:
 
 .andSep:
 	db " and ",0
-
-; called after moving
-printLocTitle:
-	mov al,'['
-	call printChar
-	mov eax,[currentLocation]
-	mov esi,[eax]
-	call printStr
-	mov al,']'
-	call printChar
-	mov al,10
-	call printChar
-	ret
 
 ; copy null-terminated str in esi to edi
 strcpy:
@@ -1405,7 +1453,7 @@ printStr:
 section .data
 
 startCabin_title:
-	db "Your Cabin",0
+	db "Your Cabin",10,0
 startCabin_desc:
 	db "The inside of your cabin. The power is out, and it is absolutely "
 	db "freezing.",0
@@ -1419,7 +1467,7 @@ startCabin:
 	dd 0,closet,0,kitchen,0, 0, 0, 0, 0,0
 
 kitchen_title:
-	db "Kitchen",0
+	db "Kitchen",10,0
 kitchen_desc:
 	db "The windows of the kitchen are iced over.",0
 kitchen:
@@ -1431,7 +1479,7 @@ kitchen:
 	dd 0,startCabin,0,0,0,0,0,0,0,0
 
 closet_title:
-	db "Closet",0
+	db "Closet",10,0
 closet_desc:
 	db "The closet is quite small, with wood-panel walling. You can feel "
 	db "a draft.",0
