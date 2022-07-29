@@ -1318,7 +1318,17 @@ readLine:
 .l1e:
 
 	mov byte [ecx],0
-	mov dword [nextWord],lineBuf
+	mov esi,lineBuf
+.l2:
+	lodsb
+	or al,al
+	jz .l2e
+	cmp al,33
+	jb .l2
+.l2e:
+	dec esi
+
+	mov [nextWord],esi
 	ret
 
 ; read next word into edi
@@ -1348,7 +1358,18 @@ getNext:
 
 	lodsb
 	or al,al
-	jnz .neol
+	jz .eol
+
+.l1:
+	lodsb
+	or al,al
+	jz .l1e
+	cmp al,33
+	jb .l1
+.l1e:
+	dec esi
+	jmp .neol
+.eol:
 	dec esi
 .neol:
 	mov [nextWord],esi
