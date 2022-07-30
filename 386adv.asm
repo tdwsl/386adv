@@ -714,8 +714,6 @@ look:
 	add ebx,4
 	mov esi,[ebx]
 	call printStr
-	mov al,10
-	call printChar
 
 	; list items
 	mov eax,[currentLocation]
@@ -1298,11 +1296,11 @@ examineContainer:
 	ret
 
 .msgP1:
-	db "Inside is ",0
+	db "You see ",0
 .closedMsg:
 	db "It's closed.",10,0
 .emptyMsg:
-	db "It's empty.",10,0
+	db "Empty.",10,0
 
 ; put ebx in container eax
 putContainer:
@@ -1712,20 +1710,20 @@ startCabin_title:
 	db "Your Cabin",10,0
 startCabin_desc:
 	db "The inside of your cabin. The power is out, and it is absolutely "
-	db "freezing.",0
+	db "freezing.",10,0
 startCabin:
 	dd startCabin_title
 	dd startCabin_desc
 	db 2 ; id
 	db 0 ; flags
 	db -20 ; temperature
-        ;  n,e,      s,w,       ne,se,nw,sw,u,d
-	dd 0,closet,0,kitchen,0, 0, 0, 0, 0,0
+        ;  n,e,     s,            w,      ne,se,nw,sw,u,d
+	dd 0,closet,outsideCabins,kitchen,0, 0, 0, 0, 0,0
 
 kitchen_title:
 	db "Kitchen",10,0
 kitchen_desc:
-	db "The windows of the kitchen are iced over.",0
+	db "The windows of the kitchen are iced over.",10,0
 kitchen:
 	dd kitchen_title
 	dd kitchen_desc
@@ -1738,14 +1736,28 @@ closet_title:
 	db "Closet",10,0
 closet_desc:
 	db "The closet is quite small, with wood-panel walling. You can feel "
-	db "a draft.",0
+	db "a draft.",10,0
 closet:
 	dd closet_title
 	dd closet_desc
 	db 4
-	db 1
+	db FLAG_DARK
 	db -20
 	dd 0,0,0,startCabin,0,0,0,0,0,0
+
+outsideCabins_title:
+	db "Outside",10,0
+outsideCabins_desc:
+	db "A clearing in the woods. The dirt is frozen dry.",10
+	db "Around you are some cabins, but it looks like everyone has "
+	db "gone.",10,0
+outsideCabins:
+	dd outsideCabins_title
+	dd outsideCabins_desc
+	db 6
+	db 0
+	db -39
+	dd startCabin,0,0,0,0,0,0,0,0,0
 
 torch_name:
 	db "torch",0
