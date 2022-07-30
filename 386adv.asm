@@ -27,13 +27,21 @@ _start:
 	mov byte [status],0
 	mov byte [torchBattery],20
 	mov byte [cookerGas],8
+
+	mov edi,initialBackupData
+	call backup
+
 	mov esi,.welcomeMsg
 	call printStr
 
 	mov esi,[currentLocation]
 	mov esi,[esi]
 	call printStr
+	call look.around
 	call mainLoop
+
+	mov esi,.quitMsg
+	call printStr
 
 	; exit
 	mov eax,1
@@ -43,6 +51,8 @@ _start:
 	db "-38.6 C Adventure",10
 	db "An ice-cold text adventure for x86 Linux",10
 	db "--",10,0
+.quitMsg:
+	db "Stay frosty!",10,0
 
 ; main loop - read line, handle verbs, etc
 mainLoop:
@@ -66,6 +76,12 @@ mainLoop:
 	mov edi,.q
 	call streq
 	jz quit
+	mov edi,.restart
+	call streq
+	jz restart
+	mov edi,.r
+	call streq
+	jz restart
 	mov edi,.look
 	call streq
 	jz look
@@ -136,6 +152,10 @@ mainLoop:
 	db "quit",0
 .q:
 	db "q",0
+.restart:
+	db "restart",0
+.r:
+	db "r",0
 .look:
 	db "look",0
 .l:
@@ -202,13 +222,23 @@ finalScore:
 	db " points.",10,0
 
 quit:
-	call finalScore
-
-	mov esi,.msg
 	add esp,8
-	jmp printStr
+	jmp finalScore
+
+restart:
+	mov esi,.msg
+	call printStr
+	mov esi,initialBackupData
+	call restore
+
+	mov esi,[currentLocation]
+	mov esi,[esi]
+	call printStr
+	call look.around
+
+	ret
 .msg:
-	db "Stay frosty!",10,0
+	db "Restarting...",10,0
 
 noNoun: ; "You can't [verb] nothing!"
 	mov esi,.msgP1
@@ -350,7 +380,7 @@ update:
 	ret
 
 .torchMsg:
-	db "The torch dies.",0
+	db "The torch dies.",10,0
 .drowsyMsg:
 	db "You feel tired.",10,0
 .veryColdMsg:
@@ -363,15 +393,43 @@ update:
 
 ; end the game
 gameOver:
-	mov esi,.msg
+	mov esi,.msg1
 	call printStr
 
 	call finalScore
 
-	mov eax,1
-	int 80h
-.msg:
+.l0:
+	mov esi,.msg2
+	call printStr
+
+	call readLine
+	mov edi,noun
+	call getNext
+	mov esi,noun
+
+	mov edi,mainLoop.quit
+	call streq
+	jz .quit
+	mov edi,mainLoop.q
+	call streq
+	jz .quit
+	mov edi,mainLoop.restart
+	call streq
+	jz restart
+	mov edi,mainLoop.r
+	call streq
+	jz restart
+
+	jmp .l0
+
+.quit:
+	add esp,4
+	ret
+
+.msg1:
 	db "Game Over",10,0
+.msg2:
+	db "You could RESTART, or QUIT.",10,0
 
 currentScore:
 	mov esi,.msg1
@@ -1354,6 +1412,26 @@ cookerTurnOff:
 
 ;;;; END ITEM VERBS  ;;;;
 
+; backup data to edi
+backup:
+	mov esi,dataBackupStart
+	mov ecx,(dataBackupEnd-dataBackupStart)/4
+	rep movsd
+	mov esi,bssBackupStart
+	mov ecx,bssBackupEnd-bssBackupStart
+	rep movsb
+	ret
+
+; restore data from esi
+restore:
+	mov edi,dataBackupStart
+	mov ecx,(dataBackupEnd-dataBackupStart)/4
+	rep movsd
+	mov edi,bssBackupStart
+	mov ecx,bssBackupEnd-bssBackupStart
+	rep movsb
+	ret
+
 ; count items at location dl with ecx
 countItems:
 	mov ecx,0
@@ -1627,6 +1705,9 @@ printStr:
 
 section .data
 
+align 4
+dataBackupStart:
+
 startCabin_title:
 	db "Your Cabin",10,0
 startCabin_desc:
@@ -1744,7 +1825,12 @@ items:
 containers:
 	dd drawerContainer,0
 
+align 4
+dataBackupEnd:
+
 section .bss
+
+bssBackupStart:
 
 currentLocation:
 	resd 1
@@ -1760,6 +1846,8 @@ torchBattery:
 	resb 1
 cookerGas:
 	resb 1
+
+bssBackupEnd:
 
 lineBuf:
 	resb 100
@@ -1777,3 +1865,9 @@ noun2:
 
 nextWord:
 	resd 1
+
+backupSize equ dataBackupEnd-dataBackupStart+bssBackupEnd-bssBackupStart
+backupData:
+	resb backupSize
+initialBackupData:
+	resb backupSize
