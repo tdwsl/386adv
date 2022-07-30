@@ -91,6 +91,15 @@ mainLoop:
 	mov edi,.examine
 	call streq
 	jz examine
+	mov edi,.read
+	call streq
+	jz examine
+	mov edi,.search
+	call streq
+	jz examine
+	mov edi,.check
+	call streq
+	jz examine
 	mov edi,.go
 	call streq
 	jz go
@@ -162,6 +171,12 @@ mainLoop:
 	db "l",0
 .examine:
 	db "examine",0
+.read:
+	db "read",0
+.search:
+	db "search",0
+.check:
+	db "check",0
 .go:
 	db "go",0
 .move:
@@ -224,6 +239,14 @@ finalScore:
 quit:
 	add esp,8
 	jmp finalScore
+
+victory:
+	mov esi,.msg
+	call printStr
+	add esp,8
+	jmp finalScore
+.msg:
+	db "You win!!!",10,0
 
 restart:
 	mov esi,.msg
@@ -1131,32 +1154,59 @@ cantPut:
 .msg:
 	db "You can't put something in that!",10,0
 
-coatTake:
+takeClothing:
+	push esi
 	call hasItem
+	pop esi
 	jz alreadyHaveThat
 
-	add byte [coldResistance],25
-	call defTake
-
-	mov esi,.msg
+	pusha
 	call printStr
-	ret
+	popa
+
+	add byte [coldResistance],dl
+	jmp defTake
+
+dropClothing:
+	push esi
+	call hasItem
+	pop esi
+	jnz dontHaveThat
+
+	pusha
+	call printStr
+	popa
+
+	sub byte [coldResistance],dl
+	jmp defDrop
+
+coatTake:
+	mov dl,21
+	mov esi,.msg
+	jmp takeClothing
 .msg:
 	db "You put the coat on. You feel warmer.",10,0
 
 coatDrop:
-	call hasItem
-	jnz dontHaveThat
-
-	pusha
+	mov dl,21
 	mov esi,.msg
-	call printStr
-	popa
-
-	sub byte [coldResistance],25
-	jmp defDrop
+	jmp dropClothing
 .msg:
 	db "It feels colder without the coat.",10,0
+
+hatTake:
+	mov dl,12
+	mov esi,.msg
+	jmp takeClothing
+.msg:
+	db "Now your head is nice and warm.",10,0
+
+hatDrop:
+	mov dl,12
+	mov esi,.msg
+	jmp dropClothing
+.msg:
+	db "You take of the hat. Brrr.",10,0
 
 torchTurnOn:
 	call hasItem
@@ -1296,11 +1346,11 @@ examineContainer:
 	ret
 
 .msgP1:
-	db "You see ",0
+	db "Inside is ",0
 .closedMsg:
 	db "It's closed.",10,0
 .emptyMsg:
-	db "Empty.",10,0
+	db "It's empty.",10,0
 
 ; put ebx in container eax
 putContainer:
@@ -1355,7 +1405,14 @@ drawerExamine:
 
 drawerPut:
 	mov eax,drawerContainer
-	jmp putContainer
+	call putContainer
+
+	mov al,[drawerContainer]
+	mov dl,[hat+8]
+	cmp al,dl
+	jz victory
+
+	ret
 
 cookerTurnOn:
 	mov al,[kitchen+9]
@@ -1407,6 +1464,61 @@ cookerTurnOff:
 	db "You turn the cooker off.",10,0
 .notMsg:
 	db "It's already off.",10,0
+
+bodyExamine:
+	mov esi,.msg
+	call printStr
+
+	mov dl,[bodyContainer]
+	call countItems
+	or ecx,ecx
+	jz .z
+
+	pusha
+	mov esi,.exMsg
+	call printStr
+	popa
+	call listItems
+	mov al,'.'
+	call printChar
+	mov al,10
+	jmp printChar
+
+.z:
+	mov esi,.nothingMsg
+	jmp printStr
+
+.msg:
+	db "You take a close look at the dead body... Ick.",10,0
+.nothingMsg:
+	db "They have nothing on them.",10,0
+.exMsg:
+	db "On their person is ",0
+
+thermometerExamine:
+	mov esi,.msg1
+	call printStr
+	mov eax,[currentLocation]
+	add eax,10
+	mov al,[eax]
+	cbw
+	cwde
+	call printNum
+	mov esi,.msg2
+	jmp printStr
+.msg1:
+	db "It reads ",0
+.msg2:
+	db " degrees C.",10,0
+
+noteExamine:
+	mov esi,.msg
+	jmp printStr
+.msg:
+	db "The note reads:",10
+	db '"Sadly, this game is unfinished. To win, put the hat in the '
+	db 'drawer."',10
+	db "How strange.",10,0
 
 ;;;; END ITEM VERBS  ;;;;
 
@@ -1635,8 +1747,10 @@ getNext:
 
 ; print number in eax
 printNum:
-	cmp eax,-1
-	jb .pos
+	push eax
+	and eax,80000000h
+	pop eax
+	jz .pos
 
 	neg eax
 	push eax
@@ -1717,8 +1831,8 @@ startCabin:
 	db 2 ; id
 	db 0 ; flags
 	db -20 ; temperature
-        ;  n,e,     s,            w,      ne,se,nw,sw,u,d
-	dd 0,closet,outsideCabins,kitchen,0, 0, 0, 0, 0,0
+        ;  n,            e,     s,w,      ne,se,nw,sw,u,d
+	dd outsideCabins,closet,0,kitchen,0, 0, 0, 0, 0,0
 
 kitchen_title:
 	db "Kitchen",10,0
@@ -1757,7 +1871,34 @@ outsideCabins:
 	db 6
 	db 0
 	db -39
-	dd startCabin,0,0,0,0,0,0,0,0,0
+	dd 0,smallCabin,startCabin,0,dirtPath,0,0,0,0,0
+
+smallCabin_title:
+	db "Tiny Cabin",10,0
+smallCabin_desc:
+	db "The cabin is small and dusty. It seems that not everyone got out."
+	db 10,0
+smallCabin:
+	dd smallCabin_title
+	dd smallCabin_desc
+	db 7
+	db FLAG_DARK
+	db -25
+	dd 0,0,0,outsideCabins,0,0,0,0,0,0
+
+dirtPath_title:
+	db "Dirt Path",10,0
+dirtPath_desc:
+	db "A winding dirt path.",10
+	db "Abruptly, it reaches a dead end, as if whoever designed it just "
+	db "gave up.",10,0
+dirtPath:
+	dd dirtPath_title
+	dd dirtPath_desc
+	db 9
+	db 0
+	db -38
+	dd 0,0,0,0,0,0,0,outsideCabins,0,0
 
 torch_name:
 	db "torch",0
@@ -1831,14 +1972,86 @@ cooker:
 	dd cantClose
 	dd cantPut
 
-items:
-	dd torch,coat,drawer,cooker,0
+bodyContainer:
+	db 8
+	db 7
 
-containers:
-	dd drawerContainer,0
+body_name:
+	db "body",0
+body_title:
+	db "a dead body",0
+body:
+	dd body_name
+	dd body_title
+	db 7
+	dd bodyExamine
+	dd cantTake
+	dd defDrop
+	dd cantTurnOn
+	dd cantTurnOff
+	dd cantOpen
+	dd cantClose
+	dd cantPut
+
+thermometer_name:
+	db "thermometer",0
+thermometer_title:
+	db "a thermometer",0
+thermometer:
+	dd thermometer_name
+	dd thermometer_title
+	db 8
+	dd thermometerExamine
+	dd defTake
+	dd defDrop
+	dd cantTurnOn
+	dd cantTurnOff
+	dd cantOpen
+	dd cantClose
+	dd cantPut
+
+hat_name:
+	db "hat",0
+hat_title:
+	db "a wooly hat",0
+hat:
+	dd hat_name
+	dd hat_title
+	db 8
+	dd defExamine
+	dd hatTake
+	dd hatDrop
+	dd cantTurnOn
+	dd cantTurnOff
+	dd cantOpen
+	dd cantClose
+	dd cantPut
+
+note_name:
+	db "note",0
+note_title:
+	db "a note",0
+note:
+	dd note_name
+	dd note_title
+	db 9
+	dd noteExamine
+	dd defTake
+	dd defDrop
+	dd cantTurnOn
+	dd cantTurnOff
+	dd cantOpen
+	dd cantClose
+	dd cantPut
 
 align 4
 dataBackupEnd:
+
+items:
+	dd torch,coat,drawer,cooker,body,thermometer,hat,note,0
+
+containers:
+	dd drawerContainer,bodyContainer,0
 
 section .bss
 
@@ -1879,7 +2092,7 @@ nextWord:
 	resd 1
 
 backupSize equ dataBackupEnd-dataBackupStart+bssBackupEnd-bssBackupStart
-backupData:
-	resb backupSize
+;backupData:
+;	resb backupSize
 initialBackupData:
 	resb backupSize
